@@ -1,0 +1,2 @@
+# name uid group gid password home shell groups description
+user 1000 user 1000 - /home/user /bin/sh - NexaOS browser user

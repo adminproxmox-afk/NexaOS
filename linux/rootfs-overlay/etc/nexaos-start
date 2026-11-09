@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+hostname -F /etc/hostname
+cat /etc/nexaos-banner > /dev/ttyS0

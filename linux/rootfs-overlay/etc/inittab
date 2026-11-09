@@ -1,0 +1,4 @@
+::sysinit:/etc/nexaos-start
+ttyS0::respawn:/sbin/getty -L 115200 ttyS0 xterm
+::shutdown:/bin/sync
+::ctrlaltdel:/sbin/reboot
