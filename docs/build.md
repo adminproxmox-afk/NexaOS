@@ -1,4 +1,4 @@
-# Сборка NexaOS 0.2
+# Сборка NexaOS 0.3
 
 ## Ubuntu и WSL2
 
@@ -7,7 +7,7 @@
 ```bash
 sudo apt update
 sudo apt install -y build-essential bc binutils bison ca-certificates cpio curl \
-  file flex git gzip libncurses-dev patch perl python3 rsync tar unzip \
+  cmake e2fsprogs file flex git gzip libncurses-dev ninja-build patch perl python3 rsync tar unzip \
   util-linux wget xz-utils
 ```
 
@@ -25,7 +25,7 @@ bash scripts/build-linux.sh
 - `NEXAOS_BUILD_DIR="$HOME/.cache/nexaos-clean"` создаёт независимое дерево сборки. По умолчанию используется `${XDG_CACHE_HOME:-$HOME/.cache}/nexaos`. Для чистой проверки изменённого defconfig или конфигурации ядра укажите новый каталог.
 - `NEXAOS_LEGAL_INFO=1` запускает цель `legal-info` и сохраняет отчёт в `output-2025.02.19/legal-info/`.
 
-После успешной сборки `assets/bzImage` и `assets/rootfs.cpio.gz` готовы к загрузке. Оригиналы находятся в `output-2025.02.19/images/` внутри каталога сборки. Скрипт выводит SHA-256 обоих файлов. При пересборке запускайте гостя после завершения копирования образов.
+После успешной сборки `assets/bzImage` и `assets/rootfs.cpio.gz` готовы к загрузке. Оригиналы находятся в `output-2025.02.19/images/` внутри каталога сборки. Скрипт выводит SHA-256 обоих файлов и при первом запуске создаёт пустой `assets/nexa-data.ext4`. При пересборке запускайте гостя после завершения копирования образов.
 
 ### Настройка Buildroot
 
@@ -41,15 +41,25 @@ env PATH=/usr/local/bin:/usr/bin:/bin make -C buildroot-2025.02.19 \
 
 ## Проверка в Chromium
 
-Запустите сервер по [README](../README.md), затем из корня проекта при наличии Node.js и Chrome:
+Запустите сервер по [README](../README.md). Выполните команды из корня проекта при наличии Node.js и Chrome.
 
 ```text
 npx --yes --package @playwright/cli playwright-cli -s=nexaos-smoke open http://127.0.0.1:8000 --browser=chrome
 npx --yes --package @playwright/cli playwright-cli -s=nexaos-smoke run-code --filename tests/browser-smoke.js
+npx --yes --package @playwright/cli playwright-cli -s=nexaos-smoke run-code --filename tests/disk-smoke.js
+npx --yes --package @playwright/cli playwright-cli -s=nexaos-smoke run-code --filename tests/desktop-smoke.js
 npx --yes --package @playwright/cli playwright-cli -s=nexaos-smoke close
 ```
 
-Проверка входит как `user`, выполняет команды в гостевой Linux, сверяет PID 1 и точки монтирования, тестирует холодную перезагрузку, выключение, полноэкранный режим, ошибку чтения образа и переключение на VGA ISO. Гостевой вывод можно увидеть в окне консоли.
+Первая проверка запускает Linux и демонстрационный ISO, выполняет команды внутри гостя и проверяет базовые функции загрузчика. Дисковая проверка пишет уникальный файл, проверяет восстановление после ошибки IndexedDB, выключает VM, перезагружает страницу и читает сохранённый файл. Графическая проверка ждёт готовности X.Org, сверяет режим VGA и проверяет процессы гостя через COM1.
+
+### Проверка ext4 в 0.3
+
+В Chrome на Windows гость смонтировал `/dev/sda` с ext4 в `/home/user`. Уникальный файл сохранился после выключения, перезагрузки страницы и нового входа в Linux. Файл в `/tmp` исчез. После повторного запуска также сохранилось удаление файла.
+
+Вторая вкладка получила отказ в доступе к занятому диску. При искусственном отказе IndexedDB гость снял заморозку и принял запись. Повторное выключение сохранило диск с открытым на запись дескриптором в госте.
+
+Копия сохранённого образа из IndexedDB прошла все пять этапов `e2fsck -fn`.
 
 ### Результаты проверки 0.2
 

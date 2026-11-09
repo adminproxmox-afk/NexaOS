@@ -1,4 +1,6 @@
 ::sysinit:/etc/nexaos-start
+::once:/usr/sbin/nexa-disk-control
+::once:/usr/sbin/nexa-desktop
 ttyS0::respawn:/sbin/getty -L 115200 ttyS0 xterm
 ::shutdown:/bin/sync
 ::ctrlaltdel:/sbin/reboot

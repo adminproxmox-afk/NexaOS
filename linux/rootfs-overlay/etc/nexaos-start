@@ -1,4 +1,18 @@
 #!/bin/sh
 set -eu
 hostname -F /etc/hostname
+case " $(cat /proc/cmdline) " in
+    *" nexa.disk=1 "*)
+        attempts=15
+        while [ ! -b /dev/sda ] && [ "$attempts" -gt 0 ]; do
+            sleep 1
+            attempts=$((attempts - 1))
+        done
+        if ! blkid /dev/sda | grep -q 'LABEL="NEXADATA"' ||
+            ! mount -t ext4 -o rw,nosuid,nodev /dev/sda /home/user; then
+            echo NEXA_DISK_FAILED > /dev/ttyS0
+            exit 1
+        fi
+        ;;
+esac
 cat /etc/nexaos-banner > /dev/ttyS0

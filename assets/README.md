@@ -1,5 +1,5 @@
 # Локальные образы
 
-`scripts/setup-assets.py` устанавливает v86, BIOS, xterm.js и исходный демонстрационный ISO в этот каталог. `scripts/build-linux.sh` публикует сюда `bzImage` и `rootfs.cpio.gz` для NexaOS.
+`scripts/setup-assets.py` устанавливает v86, BIOS, xterm.js и исходный демонстрационный ISO в этот каталог. `scripts/build-linux.sh` публикует сюда `bzImage`, `rootfs.cpio.gz` и пустой `nexa-data.ext4` на 64 МиБ. Пользовательские файлы сохраняются в копии диска в IndexedDB браузера.
 
 Двоичные файлы исключены из Git. Загрузчик ищет их по HTTP относительно `index.html`. Сборочные исходники и порядок подготовки описаны в [документации](../docs/build.md).

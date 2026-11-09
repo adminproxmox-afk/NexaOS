@@ -64,8 +64,8 @@ async page => {
   for (const directory of ["bin", "boot", "dev", "etc", "home", "lib", "proc", "root", "sbin", "sys", "tmp", "usr", "var"]) {
     check(entries.has(directory), "Missing guest directory /" + directory);
   }
-  await command("mkdir probe; echo persisted-in-ram > probe/file");
-  await command("cat probe/file /etc/os-release /proc/1/comm");
+  await command("mkdir /tmp/probe; echo persisted-in-ram > /tmp/probe/file");
+  await command("cat /tmp/probe/file /etc/os-release /proc/1/comm");
   await output(serial, /^persisted-in-ram\s*$/m);
   await output(serial, /^ID=nexaos\s*$/m);
   await output(serial, /^init\s*$/m);
@@ -94,7 +94,7 @@ async page => {
   await page.locator("#terminal .xterm").click();
   await command("user");
   await output(serial, /^\$\s*$/m);
-  await command("test ! -e probe/file && echo RAM_RESET");
+  await command("test ! -e /tmp/probe/file && echo RAM_RESET");
   await output(serial, /^RAM_RESET\s*$/m);
   await page.locator("#off").click();
   await phase("off");

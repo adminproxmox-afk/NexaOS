@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+# xinit starts this only after a client can connect to X.Org.
+xsetroot -solid '#1b2340'
+echo NEXA_X_READY > /dev/ttyS0
+exec su -s /bin/sh -c 'cd "$HOME" && exec xterm -title NexaDesktop -geometry 110x36+24+24 -bg "#101627" -fg "#dce7ff"' user

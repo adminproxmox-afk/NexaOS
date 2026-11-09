@@ -16,6 +16,10 @@ if [[ $EUID == 0 ]]; then
     echo "Run the build as a regular Linux user." >&2
     exit 1
 fi
+if ! command -v mke2fs >/dev/null; then
+    echo "Install e2fsprogs to generate the NexaOS ext4 seed disk." >&2
+    exit 1
+fi
 
 mkdir -p -- "$work"
 cd -- "$work"
@@ -43,7 +47,7 @@ fi
 # Stage the external tree on Linux so WSL builds also work from /mnt/c or /mnt/e.
 external="$work/external"
 mkdir -p -- "$external"
-rsync -rp --delete --chmod=D755,F644 -- "$root/linux/" "$external/"
+rsync -rpt --delete --chmod=D755,F644 -- "$root/linux/" "$external/"
 chmod +x "$external/board/nexaos/post-build.sh"
 
 output="$work/output-$version"
@@ -58,6 +62,12 @@ fi
 mkdir -p -- "$root/assets"
 exec 8>"$root/assets/.publish-lock"
 flock 8
+disk="$root/assets/nexa-data.ext4"
+if [[ ! -f $disk ]]; then
+    mke2fs -q -F -t ext4 -L NEXADATA -m 0 \
+        -E root_owner=1000:1000,lazy_itable_init=0,lazy_journal_init=0 "$disk.part" 64M
+    mv -f -- "$disk.part" "$disk"
+fi
 for image in bzImage rootfs.cpio.gz; do
     install -m 0644 "$output/images/$image" "$root/assets/$image.part"
     mv -f -- "$root/assets/$image.part" "$root/assets/$image"

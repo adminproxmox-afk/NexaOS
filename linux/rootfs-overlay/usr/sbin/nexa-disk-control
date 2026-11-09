@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+grep -q '^/dev/sda /home/user ext4 rw,' /proc/mounts || exit 0
+stty -F /dev/ttyS1 115200 raw -echo clocal
+exec 3<>/dev/ttyS1
+printf 'READY\n' >&3
+frozen=0
+while read -r id request <&3; do
+    case "$id" in ''|*[!0-9]*) continue ;; esac
+    case "$request" in
+        FLUSH)
+            if [ "$frozen" = 1 ] || fsfreeze --freeze /home/user; then
+                frozen=1
+                printf '%s FLUSHED\n' "$id" >&3
+            else
+                printf '%s BUSY\n' "$id" >&3
+            fi
+            ;;
+        THAW)
+            if [ "$frozen" = 0 ] || fsfreeze --unfreeze /home/user; then
+                frozen=0
+                printf '%s THAWED\n' "$id" >&3
+            else
+                printf '%s THAW_FAILED\n' "$id" >&3
+            fi
+            ;;
+    esac
+done

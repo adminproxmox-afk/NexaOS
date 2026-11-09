@@ -7,11 +7,12 @@
   <title>NexaOS · Диспетчер загрузки</title>
   <link rel="icon" href="web/nexa.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/xterm.css">
-  <link rel="stylesheet" href="style.css?v=0.2">
+  <link rel="stylesheet" href="style.css?v=0.3">
   <script defer src="assets/libv86.js?v=0.5.473"></script>
   <script defer src="assets/xterm.js"></script>
   <script defer src="assets/xterm-fit.js"></script>
-  <script defer src="app.js?v=0.2"></script>
+  <script defer src="web/disk.js?v=0.3"></script>
+  <script defer src="app.js?v=0.3"></script>
 </head>
 <body>
   <header class="topbar">
@@ -19,7 +20,7 @@
       <img src="web/nexa.svg" alt="" width="38" height="38">
       <div><strong>NexaOS</strong><span>Linux Browser Edition</span></div>
     </div>
-    <span class="version">PREVIEW <b>0.2</b></span>
+    <span class="version">PREVIEW <b>0.3</b></span>
   </header>
   <main class="workspace">
     <header class="intro">
@@ -47,9 +48,12 @@
         </div>
         <footer class="machine-bottom">
           <span id="inputHint">Консоль появится после включения</span>
-          <button type="button" class="icon-button" id="fullscreen" aria-label="Полноэкранный режим" title="Полноэкранный режим">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5m0 6v5h-5m-6 0H4v-5"/></svg>
-          </button>
+          <div class="display-actions">
+            <button type="button" class="view-button" id="switchDisplay" hidden>Открыть COM1</button>
+            <button type="button" class="icon-button" id="fullscreen" aria-label="Полноэкранный режим" title="Полноэкранный режим">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5m0 6v5h-5m-6 0H4v-5"/></svg>
+            </button>
+          </div>
         </footer>
       </section>
 
@@ -58,7 +62,8 @@
           <h2 id="configTitle">Виртуальная машина</h2>
           <label for="profile">Загрузочный образ</label>
           <select id="profile" aria-describedby="profileHint">
-            <option value="custom">NexaOS 0.2</option>
+            <option value="custom">NexaOS 0.3</option>
+            <option value="desktop">NexaDesktop · X.Org</option>
             <option value="demo">Демонстрационный Linux ISO</option>
             <option value="legacy">Свой образ · VGA</option>
           </select>
@@ -80,6 +85,7 @@
             <button type="button" id="reset" title="Холодная перезагрузка" disabled>Перезагрузить</button>
             <button type="button" id="off" disabled>Выключить</button>
           </div>
+          <button type="button" id="forceOff" class="force-off" hidden>Выключить без сохранения</button>
         </section>
         <section class="status" aria-label="Состояние виртуальной машины">
           <div class="status-line" role="status"><i id="statusDot" aria-hidden="true"></i><strong id="status">Выключена</strong></div>
@@ -91,7 +97,7 @@
     <footer class="system-strip">
       <span><b>CPU</b> x86 · 32 бит</span>
       <span><b>VM</b> v86 / WebAssembly</span>
-      <span><b>СЕАНС</b> Локальный · RAM</span>
+      <span><b>ДИСК</b> <span id="storageLabel">ext4 · 64 МиБ</span></span>
     </footer>
   </main>
 </body>

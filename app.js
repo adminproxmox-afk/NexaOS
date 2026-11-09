@@ -4,9 +4,10 @@ const $ = id => document.getElementById(id);
 const profiles = {
   custom: {
     serial: true,
+    disk: true,
     files: { bzimage: "bzImage", initrd: "rootfs.cpio.gz" },
-    cmdline: "console=tty0 console=ttyS0,115200 rdinit=/init tsc=reliable mitigations=off",
-    hint: "Linux i686 и BusyBox. Для входа введите user.",
+    cmdline: "console=tty0 console=ttyS0,115200 rdinit=/init tsc=reliable mitigations=off nexa.disk=1 nomodeset",
+    hint: "Linux i686 с постоянным каталогом /home/user.",
   },
   demo: {
     files: { cdrom: "linux.iso" },
@@ -18,6 +19,12 @@ const profiles = {
     hint: "Пара bzImage и initramfs из assets/ с выводом на VGA.",
   },
 };
+profiles.desktop = {
+  ...profiles.custom,
+  desktop: true,
+  cmdline: profiles.custom.cmdline.replace("nomodeset", "nexa.desktop=1"),
+  hint: "Гостевой X.Org с xterm и тем же каталогом /home/user.",
+};
 
 const labels = {
   off: "Выключена",
@@ -26,6 +33,7 @@ const labels = {
   ready: "Linux готов",
   running: "Эмуляция активна",
   timeout: "Ожидание Linux",
+  saving: "Сохранение диска",
   stopping: "Выключение",
   error: "Ошибка",
 };
@@ -39,6 +47,10 @@ const MiB = 1024 * 1024;
 const initrdOffset = 64 * MiB; // v86 0.5.473 loads the initrd at 64 MiB.
 let session = null;
 
+function diskMayBeMounted(vm) {
+  return vm?.disk && (vm.diskReady || vm.banner);
+}
+
 function render(phase, message) {
   machine.dataset.phase = phase;
   $("statusDot").dataset.phase = phase;
@@ -50,8 +62,10 @@ function render(phase, message) {
   progress.hidden = phase !== "loading" && phase !== "booting";
   if (phase === "booting") progress.removeAttribute("value");
   $("start").disabled = $("profile").disabled = $("memory").disabled = Boolean(session);
-  $("off").disabled = !session || session.closing;
-  $("reset").disabled = !session?.initialized || session.closing;
+  $("off").disabled = !session || session.closing || session.saving;
+  $("reset").disabled = !session?.initialized || session.closing || session.saving;
+  $("forceOff").hidden = !session?.saveFailed || session.closing || session.saving;
+  $("switchDisplay").hidden = !session?.initialized || !session.profile.desktop || session.closing;
 }
 
 function renderProfile() {
@@ -60,8 +74,25 @@ function renderProfile() {
   memory.querySelector('option[value="64"]').disabled = Boolean(profile.files.initrd);
   if (profile.files.initrd && memory.value === "64") memory.value = "128";
   $("profileHint").textContent = profile.hint;
-  $("consoleTitle").textContent = profile.serial ? "Последовательная консоль" : "Экран гостевой системы";
-  $("consoleTag").textContent = profile.serial ? "TTY / COM1" : "VGA";
+  $("storageLabel").textContent = profile.disk ? "ext4 · 64 МиБ" : "Сеанс в RAM";
+  renderDisplay(profile, profile.desktop || !profile.serial);
+}
+
+function renderDisplay(profile, vga) {
+  $("consoleTitle").textContent = vga
+    ? (profile.desktop ? "NexaDesktop" : "Экран гостевой системы")
+    : "Последовательная консоль";
+  $("consoleTag").textContent = vga ? (profile.desktop ? "X11 / VGA" : "VGA") : "TTY / COM1";
+  $("switchDisplay").textContent = vga ? "Открыть COM1" : "Открыть VGA";
+}
+
+function showDisplay(vm, vga) {
+  terminalHost.hidden = vga || !vm.profile.serial;
+  screen.hidden = !vga;
+  $("inputHint").textContent = vga
+    ? "Нажмите на VGA для ввода · F6 возвращает фокус к управлению"
+    : "Нажмите на терминал для ввода · Ctrl+] возвращает фокус к управлению";
+  renderDisplay(vm.profile, vga);
 }
 
 function checkAsset(name, data) {
@@ -81,7 +112,8 @@ async function loadAsset(name, vm) {
     throw new Error("Не удалось загрузить assets/" + name + ". " + error.message);
   });
   if (!response.ok) {
-    const setup = name === "bzImage" || name === "rootfs.cpio.gz" ? "build-linux.sh" : "setup.sh или setup.ps1";
+    const setup = ["bzImage", "rootfs.cpio.gz", "nexa-data.ext4"].includes(name)
+      ? "build-linux.sh" : "setup.sh или setup.ps1";
     throw new Error("assets/" + name + " · HTTP " + response.status + ". Запустите scripts/" + setup + ".");
   }
   const buffer = await response.arrayBuffer();
@@ -107,16 +139,22 @@ function openTerminal(vm) {
   vm.resize = new ResizeObserver(() => fit.fit());
   vm.resize.observe(terminalHost);
   terminal.onData(data => {
-    if (session === vm && vm.initialized && !vm.closing) vm.emulator.serial_send_bytes(0, encoder.encode(data));
+    if (session === vm && vm.initialized && !vm.closing && !vm.saving) {
+      vm.emulator.serial_send_bytes(0, encoder.encode(data));
+    }
   });
-  $("inputHint").textContent = "Нажмите на терминал для ввода · Ctrl+] возвращает фокус к управлению";
 }
 
 function ready(vm) {
   if (session !== vm || vm.closing || vm.ready) return;
+  if (vm.profile.disk && (!vm.diskReady || !vm.loginReady)) return;
+  if (vm.profile.desktop && !vm.xReady) return;
   vm.ready = true;
   clearTimeout(vm.timer);
-  render("ready", vm.profile.serial ? "NexaOS запущена. Введите user и нажмите Enter." : "Гостевая оболочка ISO готова к вводу.");
+  const message = vm.profile.desktop
+    ? "X.Org принимает подключения. COM1 доступен для диагностики."
+    : vm.profile.serial ? "NexaOS запущена. Введите user и нажмите Enter." : "Гостевая оболочка ISO готова к вводу.";
+  render("ready", message);
 }
 
 function serialByte(vm, byte) {
@@ -132,8 +170,26 @@ function serialByte(vm, byte) {
   if (byte === 10) vm.line = "";
   else if (byte !== 13) vm.line = (vm.line + String.fromCharCode(byte)).slice(-180);
   if (vm.line === "Boot completed successfully.") vm.banner = true;
-  if (vm.banner && vm.line === "nexaos login:") ready(vm);
-  if (vm.line.endsWith("Kernel panic - not syncing")) reportPanic(vm);
+  if (vm.banner && vm.line === "nexaos login:") {
+    vm.loginReady = true;
+    ready(vm);
+  }
+  if (vm.line === "NEXA_DISK_FAILED") {
+    clearTimeout(vm.timer);
+    render("error", "Гость не смог подключить ext4 к /home/user. Сохранённый образ не изменён.");
+  }
+  if (vm.profile.desktop && vm.line === "NEXA_X_READY") {
+    vm.xReady = true;
+    ready(vm);
+  }
+  if (vm.profile.desktop && vm.line === "NEXA_X_STOPPED") {
+    clearTimeout(vm.timer);
+    showDisplay(vm, false);
+    render(vm.xReady ? "running" : "error", vm.xReady
+      ? "Графический сеанс завершился. Консоль COM1 продолжает работать."
+      : "X.Org не запустился. Журналы гостя доступны через COM1 в /var/log/.");
+  }
+  if (/(?:^|\] )Kernel panic - not syncing:$/.test(vm.line)) reportPanic(vm);
 }
 
 function reportPanic(vm) {
@@ -142,11 +198,89 @@ function reportPanic(vm) {
   render("error", "Ядро Linux остановилось. Подробности остались в консоли.");
 }
 
+function diskByte(vm, byte) {
+  if (session !== vm || vm.closing) return;
+  if (byte !== 10) {
+    vm.diskLine = (vm.diskLine + String.fromCharCode(byte)).slice(-80);
+    return;
+  }
+  const line = vm.diskLine.trim();
+  vm.diskLine = "";
+  if (line === "READY") {
+    vm.diskReady = true;
+    ready(vm);
+  }
+  vm.diskReply?.(line);
+}
+
+function diskRequest(vm, command, expected, refused) {
+  const id = ++vm.diskSequence;
+  return new Promise((resolve, reject) => {
+    const finish = error => {
+      clearTimeout(timer);
+      vm.diskReply = vm.cancelDiskReply = null;
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error("Гость не ответил на " + command + ".")), 12_000);
+    vm.cancelDiskReply = finish;
+    vm.diskReply = line => {
+      if (line === id + " " + expected) finish();
+      if (line === id + " " + refused) finish(new Error(command === "FLUSH"
+        ? "Гость не смог приостановить запись на ext4."
+        : "Гость не восстановил режим записи диска."));
+    };
+    try {
+      vm.emulator.serial_send_bytes(1, encoder.encode(id + " " + command + "\n"));
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
+async function powerAction(restart) {
+  const vm = session;
+  if (!vm || vm.closing || vm.saving) return;
+  let message = "Виртуальная машина выключена. Содержимое RAM сброшено.";
+  if (vm.disk) message = "Сохранённый образ диска остался без изменений.";
+  if (diskMayBeMounted(vm)) {
+    let failure;
+    vm.saving = true;
+    render("saving", "Гость сбрасывает кэш и приостанавливает запись на ext4.");
+    try {
+      await diskRequest(vm, "FLUSH", "FLUSHED", "BUSY");
+      if (vm.closing) return;
+      vm.diskWrite = vm.disk.save();
+      await vm.diskWrite;
+      message = "Диск сохранён. Содержимое RAM сброшено.";
+    } catch (error) {
+      if (vm.closing) return;
+      let recovery = "";
+      try {
+        await diskRequest(vm, "THAW", "THAWED", "THAW_FAILED");
+      } catch (thawError) {
+        recovery = " " + thawError.message;
+      }
+      failure = "Сохранение диска не завершилось. " + error.message + recovery;
+    } finally {
+      vm.saving = false;
+    }
+    if (vm.closing) return;
+    if (failure) {
+      vm.saveFailed = true;
+      render("error", failure);
+      return;
+    }
+  }
+  await closeSession(vm, "off", message);
+  if (restart && machine.dataset.phase === "off") await start();
+}
+
 function launchGuest(vm) {
   vm.initialized = true;
   clearTimeout(vm.timer);
   if (vm.closing) return;
-  if (!vm.profile.serial) {
+  if (vm.hasVga) {
     vm.emulator.keyboard_set_enabled(document.activeElement === screen);
     vm.emulator.mouse_set_enabled(document.activeElement === screen);
   }
@@ -157,7 +291,10 @@ function launchGuest(vm) {
     render("booting", "v86 запущен. Ожидаем приглашение гостевой системы.");
     vm.timer = setTimeout(() => {
       if (session === vm && !vm.closing && !vm.ready) {
-        render("timeout", "Приглашение не появилось за 180 секунд. Проверьте вывод консоли.");
+        if (vm.profile.desktop) showDisplay(vm, false);
+        render("timeout", vm.profile.desktop
+          ? "Графический сеанс не подтвердил готовность за 180 секунд. Проверьте COM1 и журналы /var/log/."
+          : "Гость не подтвердил готовность за 180 секунд. Проверьте вывод консоли.");
       }
     }, 180_000);
   }
@@ -176,6 +313,7 @@ async function closeSession(vm, phase, message) {
   if (session !== vm || vm.closing) return;
   vm.closing = true;
   render("stopping", "Освобождаем ресурсы виртуальной машины.");
+  vm.cancelDiskReply?.(new Error("Виртуальная машина останавливается."));
   vm.downloads.abort();
   clearInterval(vm.vgaPoll);
   cancelAnimationFrame(vm.frame);
@@ -206,11 +344,14 @@ async function closeSession(vm, phase, message) {
     phase = "error";
   }
   clearTimeout(vm.timer);
+  await vm.diskWrite?.catch(() => {});
+  vm.disk?.close();
   screen.hidden = true;
   screen.firstElementChild.replaceChildren();
   screen.lastElementChild.style.display = "none";
   $("inputHint").textContent = "Консоль появится после включения";
   if (!vm.cleanupFailed) session = null;
+  renderProfile();
   render(phase, message);
 }
 
@@ -235,10 +376,11 @@ async function start() {
   }
 
   const vm = session = {
-    kind, profile, downloads: new AbortController(), bytes: [], line: "", frame: 0,
+    kind, profile, hasVga: profile.desktop || !profile.serial,
+    downloads: new AbortController(), bytes: [], line: "", diskLine: "", diskSequence: 0, frame: 0,
   };
   const files = { wasm: "v86.wasm", bios: "seabios.bin", vga_bios: "vgabios.bin", ...profile.files };
-  progress.max = Object.keys(files).length;
+  progress.max = Object.keys(files).length + Number(Boolean(profile.disk));
   progress.value = 0;
   render("loading", "Читаем WebAssembly, BIOS и загрузочный образ.");
   vm.timer = setTimeout(() => {
@@ -253,14 +395,21 @@ async function start() {
     if (images.initrd && initrdOffset + images.initrd.byteLength > memorySize) {
       throw new Error("Архив initramfs не помещается в память. Увеличьте объём RAM и запустите VM снова.");
     }
+    if (profile.disk) {
+      const disk = await openNexaDisk(() => loadAsset("nexa-data.ext4", vm), vm.downloads.signal);
+      if (session !== vm || vm.closing) {
+        disk.close();
+        return;
+      }
+      vm.disk = disk;
+      images.hda = disk.buffer;
+      if (disk.restored) progress.value += 1;
+    }
     const wasm = await WebAssembly.compile(wasmBytes);
     if (session !== vm || vm.closing) return;
 
     if (profile.serial) openTerminal(vm);
-    else {
-      screen.hidden = false;
-      $("inputHint").textContent = "Нажмите на VGA для ввода · F6 возвращает фокус к управлению";
-    }
+    showDisplay(vm, vm.hasVga);
 
     vm.hardware = new Promise(resolve => { vm.finishHardware = resolve; });
     try {
@@ -275,10 +424,11 @@ async function start() {
         },
         memory_size: memorySize,
         autostart: false,
+        uart1: Boolean(profile.disk),
         disable_speaker: true,
-        disable_keyboard: Boolean(profile.serial),
-        disable_mouse: Boolean(profile.serial),
-        screen_container: profile.serial ? undefined : screen,
+        disable_keyboard: !vm.hasVga,
+        disable_mouse: !vm.hasVga,
+        screen_container: vm.hasVga ? screen : undefined,
         cmdline: profile.cmdline,
         ...Object.fromEntries(Object.entries(images).map(([key, buffer]) => [key, { buffer }])),
       });
@@ -291,22 +441,32 @@ async function start() {
       launchGuest(vm);
     });
     if (profile.serial) vm.emulator.add_listener("serial0-output-byte", byte => serialByte(vm, byte));
+    if (profile.disk) vm.emulator.add_listener("serial1-output-byte", byte => diskByte(vm, byte));
   } catch (error) {
     await fail(vm, error);
   }
 }
 
 $("start").addEventListener("click", start);
-$("off").addEventListener("click", () => {
-  if (session) void closeSession(session, "off", "Виртуальная машина выключена. Содержимое RAM сброшено.");
+$("off").addEventListener("click", () => { void powerAction(false); });
+$("reset").addEventListener("click", () => { void powerAction(true); });
+$("forceOff").addEventListener("click", () => {
+  if (session?.saveFailed && !session.saving) {
+    void closeSession(session, "off", "VM выключена. Диск остался на последней сохранённой версии.");
+  }
 });
-$("reset").addEventListener("click", async () => {
-  if (!session?.initialized || session.closing) return;
-  await closeSession(session, "off", "Перезапускаем виртуальную машину.");
-  if (machine.dataset.phase === "off") await start();
+
+window.addEventListener("beforeunload", event => {
+  if (diskMayBeMounted(session) && !session.closing) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
 });
 
 $("profile").addEventListener("change", renderProfile);
+$("switchDisplay").addEventListener("click", () => {
+  if (session?.initialized && session.profile.desktop) showDisplay(session, screen.hidden);
+});
 $("fullscreen").addEventListener("click", async () => {
   try {
     if (document.fullscreenElement === machine) await document.exitFullscreen();
